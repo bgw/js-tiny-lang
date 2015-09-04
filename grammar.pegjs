@@ -1,7 +1,7 @@
 {
   function unroll(head, tail, idx) {
     if (idx == null) idx = -1;
-    return [head].concat(tail.map(function(el) {
+    return (head === undefined ? [] : [head]).concat(tail.map(function(el) {
       return el[idx < 0 ? el.length + idx : idx];
     }));
   }
@@ -27,24 +27,18 @@ Tiny
   }
 
 Declarations
-  = declarations:(VarKeyword _ dec:Declaration* _ ';' { return dec; })?
-  {
-    return declarations || [];
-  }
+  = VarKeyword dclns:(_ Declaration)* { return unroll(undefined, dclns); }
+  / '' { return []; }
 
-Declaration = ids:DeclarationNames _ ':' _ type:Type {
-  return ast({
-    type: 'Declaration',
-    ids,
-    valueType: type
-  });
+Declaration = ids:DeclarationNames _ ':' _ valueType:Type _ ';' {
+  return ast({type: 'Declaration', ids, valueType});
 }
 DeclarationNames
-  =
-  names:(
+  = names:(
     head:Identifier tail:(_ ',' _ Identifier)*
     { return unroll(head, tail); }
-  )? { return names || []; }
+  )?
+  { return names || []; }
 
 Type
   = IntegerKeyword
@@ -129,7 +123,7 @@ Whitespace 'whitespace'
   = $[ \t\v\f\r\n]+
 
 // mandatory whitespace
-__
+__ 'whitespace'
   = Whitespace? Comment _
   / Whitespace
 // optional whitespace
