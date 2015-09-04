@@ -1,0 +1,12 @@
+{
+  "name": "tiny-lang",
+  "version": "0.0.1",
+  "devDependencies": {
+    "babel": "^5.8.23",
+    "pegjs": "^0.9.0"
+  },
+  "dependencies": {
+    "ast-types": "^0.8.11",
+    "recast": "^0.10.32"
+  }
+}
