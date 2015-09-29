@@ -2,11 +2,23 @@
   "name": "tiny-lang",
   "version": "0.0.1",
   "devDependencies": {
-    "babel": "^5.8.23",
-    "pegjs": "^0.9.0"
+    "babel-core": "^5.8.25",
+    "del": "^2.0.2",
+    "gulp": "^3.9.0",
+    "gulp-babel": "^5.2.1",
+    "gulp-load-plugins": "^0.10.0",
+    "gulp-peg": "nicompte/gulp-peg#1d635725b49d47a7d9672156a63794b8cb7c03c7"
   },
   "dependencies": {
     "ast-types": "^0.8.11",
-    "recast": "^0.10.32"
+    "bluebird": "^2.10.1",
+    "recast": "^0.10.32",
+    "yargs": "^3.26.0"
+  },
+  "bin": {
+    "tinyjs": "./bin/tinyjs"
+  },
+  "scripts": {
+    "install": "gulp"
   }
 }

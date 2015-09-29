@@ -12,6 +12,24 @@
     }
     return node;
   }
+
+  // Simulates left recursion with right recursion on BinaryExpressions
+  function leftRecursive(subtype, node) {
+    node._leftRecursiveSubtype = subtype;
+    if (node.right._leftRecursiveSubtype === subtype) {
+      // rotate  =>   to be
+      //   B            D
+      //  / \          / \
+      // A   D        B   F
+      //    / \      / \
+      //   C   F    A   C
+      const tmp = node;
+      node = node.right;
+      tmp.right = node.left;
+      node.left = tmp;
+    }
+    return node;
+  }
 }
 
 Tiny
@@ -25,6 +43,20 @@ Tiny
     }
     return ast({type: 'Tiny', name, declarations, body});
   }
+
+Whitespace 'whitespace'
+  = $[ \t\v\f\r\n]+
+
+Comment 'comment'
+  = BlockComment
+  / SingleComment
+
+// mandatory whitespace
+__ 'whitespace'
+  = Whitespace? Comment _
+  / Whitespace
+// optional whitespace
+_ = __?
 
 Declarations
   = VarKeyword dclns:(_ Declaration)* { return unroll(undefined, dclns); }
@@ -52,18 +84,22 @@ Statement
  / BlockStatement
  / ('' { return null; })
 
-AssignmentStatement = left:Identifier _ AssignmentOperator _ right:Expression {
+AssignmentStatement = left:Identifier _ ':=' _ right:Expression {
   return ast({type: 'AssignmentStatement', left, right});
 }
 
-OutputStatement = OutputKeyword _ '(' _ value:Expression _ ')' {
-  return ast({type: 'OutputStatement', value});
-}
+OutputStatement =
+  OutputKeyword _ '(' _ head:Expression tail:(_ ',' _ Expression)* _ ')'
+  {
+    return ast({type: 'OutputStatement', arguments: unroll(head, tail)});
+  }
 
+// There is the dangling-else problem, but since this is an LL(1) parser, this
+// gets resolved cleanly, giving the innermost `if` control of the else.
 IfStatement
   = IfKeyword _ test:Expression
   _ ThenKeyword _ consequent:Statement
-  _ ElseKeyword _ alternate:Statement
+  alternate:(_ ElseKeyword _ s:Statement { return s; })?
   {
     return ast({type: 'IfStatement', test, consequent, alternate});
   }
@@ -87,55 +123,65 @@ BlockStatement
     });
   }
 
+// Expression is broken up into multiple "levels" that enforce precedence and
+// varying associativity
 Expression
-  = BinaryExpression
+  = left:AddExpression
+  _ operator:$('<=' / '>=' / '<' / '>' / '=' / '<>')
+  _ right:AddExpression
+  { return ast({type: 'BinaryExpression', operator, left, right}); }
+  / AddExpression
+
+// While the grammar is written as as right-recursive, the result is actually
+// transformed to left-recursive using a helper function.
+AddExpression
+  = left:MultExpression
+  _ operator:$('-' / '+' / OrKeyword)
+  _ right:AddExpression
+  {
+    return leftRecursive('AddExpression',
+      ast({type: 'BinaryExpression', operator, left, right})
+    );
+  }
+  / MultExpression
+
+// Actually left-recursive. See previous comment.
+MultExpression
+  = left:UnaryExpression
+  // we have to special-case '**' to avoid overlapping with PowExpression
+  _ operator:$(('*' !'*') / '/' / AndKeyword / ModKeyword)
+  _ right:MultExpression
+  {
+    return leftRecursive('MultExpression',
+      ast({type: 'BinaryExpression', operator, left, right})
+    );
+  }
+  / UnaryExpression
+
+// Normally, a UnaryExpression would have higher precedence than PowExpression,
+// that's not true in this language.
+UnaryExpression
+  = operator:$('-' / '+' / NotKeyword) _ argument:UnaryExpression
+  { return ast({type: 'UnaryExpression', operator, argument}); }
+  / PowExpression
+
+// Yes, this is right-recursive, though in a serious language, it wouldn't be
+PowExpression
+  = left:PrimaryExpression _ operator:$'**' _ right:PowExpression
+  {
+    return leftRecursive('MultExpression',
+      ast({type: 'BinaryExpression', operator, left, right})
+    );
+  }
   / PrimaryExpression
 
 // prevents left-recursion for BinaryExpression
 PrimaryExpression
   = Identifier
   / Literal
-  / UnaryExpression
   / ReadKeyword { return ast({type: 'ReadExpression'}); }
+  / EofKeyword { return ast({type: 'EofExpression'}); }
   / '(' _ sub:Expression _ ')' { return sub; }
-
-UnaryExpression = operator:'-' _ argument:Expression {
-  return ast({type: 'UnaryExpression', operator, argument});
-}
-
-BinaryExpression
-  = left:PrimaryExpression _ operator:BinaryOperator _ right:Expression
-  {
-    return ast({type: 'BinaryExpression', operator, left, right});
-  }
-
-BinaryOperator
-  = '+'
-  / LeqOperator
-
-// HACK: The tws-based version of tiny uses flex and yacc, which gives separate
-// lexing and tree-building steps. PEG does this all-in-one. It's useful to be
-// able to get at the token list when comparing these parsers, so this lets us
-// do that.
-TokenList = _ list:(token:Token _ { return token; })* { return list; }
-
-Whitespace 'whitespace'
-  = $[ \t\v\f\r\n]+
-
-// mandatory whitespace
-__ 'whitespace'
-  = Whitespace? Comment _
-  / Whitespace
-// optional whitespace
-_ = __?
-
-// TODO: consider counting comments in the token list
-Token
-  = Keyword
-  / Operator
-  / Identifier
-  / Literal
-  / Punctuation
 
 Keyword
   = ProgramKeyword
@@ -151,6 +197,13 @@ Keyword
   / WhileKeyword
   / DoKeyword
   / ReadKeyword
+  / EofKeyword
+  / OrKeyword
+  / AndKeyword
+  / ModKeyword
+  / NotKeyword
+  / TrueKeyword
+  / FalseKeyword
 
 ProgramKeyword =    $('program' !IdentifierPart)
 VarKeyword =        $('var'     !IdentifierPart)
@@ -165,13 +218,13 @@ ElseKeyword =       $('else'    !IdentifierPart)
 WhileKeyword =      $('while'   !IdentifierPart)
 DoKeyword =         $('do'      !IdentifierPart)
 ReadKeyword =       $('read'    !IdentifierPart)
-
-Operator
-  = AssignmentOperator
-  / LeqOperator
-
-AssignmentOperator = ':='
-LeqOperator = '<='
+EofKeyword =        $('eof'     !IdentifierPart)
+OrKeyword =         $('or'      !IdentifierPart)
+AndKeyword =        $('and'     !IdentifierPart)
+ModKeyword =        $('mod'     !IdentifierPart)
+NotKeyword =        $('not'     !IdentifierPart)
+TrueKeyword =       $('true'    !IdentifierPart)
+FalseKeyword =      $('false'   !IdentifierPart)
 
 // NOTE: In this implementation, identifiers can't be keywords to maintain full
 // compatibility with the TWS. However, in cases where the grammar is not
@@ -194,6 +247,9 @@ IdentifierPart = [_a-z0-9]i
 Literal
   = StringLiteral
   / IntegerLiteral
+  / kw:$(TrueKeyword / FalseKeyword) {
+    return ast({type: 'Literal', valueType: 'boolean', value: kw === 'true'});
+  }
 
 // TODO: for strict compatibility this disallows empty strings, but the grammar
 // should really support it
@@ -212,10 +268,6 @@ IntegerLiteral = match:$[0-9]+ {
     value: +match,
   });
 }
-
-Comment 'comment'
-  = BlockComment
-  / SingleComment
 
 BlockComment = '{' body:$[^}]+ '}' {
   return ast({type: 'BlockComment', body});
